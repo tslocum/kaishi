@@ -32,10 +32,11 @@ class kaishi(object):
     self.peers = []
     self.uidlist = []
     self.provider = ''
-    self.host = urllib.urlopen('http://www.showmyip.com/simple/').read()
+    self.host = urllib.urlopen('http://ip.paq.cc/').read()
     self.port = 44545
     self.peerid = self.host + ':' + str(self.port)
 
+    # function hooks
     self.handleIncomingData = None
     self.handleAddedPeer = None
     self.handlePeerNickname = None
@@ -44,6 +45,7 @@ class kaishi(object):
   def start(self):
     self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     self.socket.bind(('', self.port))
+    self.socket.settimeout(5)
     thread.start_new_thread(self.receiveData, ())
     thread.start_new_thread(self.pingAllPeers, ())
     thread.start_new_thread(self.pingProvider, ())
@@ -58,7 +60,7 @@ class kaishi(object):
 
     if not args['uid']:
       uid = self.makeID(message)
-      self.debugMessage('Making uid for ' + message)
+      self.debugMessage('Making uid for ' + identifier + ' ' + repr(args))
     else:
       uid = args['uid']
     self.uidlist.append(uid)
@@ -73,21 +75,21 @@ class kaishi(object):
     data = zlib.compress(unicode(data), 9)
     
     if args['to']:
-      try:
-        self.socket.sendto(data, self.peerIDToTuple(args['to']))
-      except:
-        self.dropPeer(args['to'])
-        return False
-      return True
+      recipients = [args['to']]
     else:
-      for peer in self.peers:
-        try:
-          self.socket.sendto(data, self.peerIDToTuple(peer))
-        except:
-          self.dropPeer(peer)
-          return False
-      return True
+      recipients = self.peers
 
+    for peer in recipients: 
+      try:
+        self.socket.sendto(data, self.peerIDToTuple(peer))
+      except:
+        # something went wrong, drop the peer
+        self.debugMessage('Dropping ' + peer + ' due to a connection error')
+        self.dropPeer(peer)
+        if args['to']:
+          return False
+    return True
+    
   def receiveData(self):
     while 1:
       data = None
@@ -109,6 +111,7 @@ class kaishi(object):
         if peerid not in self.peers and identifier != 'JOIN' and identifier != 'DROP':
           self.addPeer(peerid)
           self.debugMessage('Adding ' + peerid + ' from outside message')
+          
         if identifier == 'JOIN': # a user requests that they join the network
           self.addPeer(peerid)
           self.setPeerNickname(peerid, message) # add the nick sent in the JOIN message
@@ -116,9 +119,7 @@ class kaishi(object):
         elif identifier == 'PEERS': # list of connected peers
           try:
             peers = pickle.loads(message)
-            for peer, peer_nick in peers.items():
-              self.addPeer(peer)
-              self.setPeerNickname(peer, peer_nick)
+            [self.addPeer(peer, peer_nick) for peer, peer_nick in peers.items()]
             self.debugMessage('Got peerlist from ' + peerid)
           except:
             pass
@@ -138,13 +139,19 @@ class kaishi(object):
       elif data:
         self.debugMessage('Not rerouting data: ' + data)
 
-  def addPeer(self, peerid):
+  def addPeer(self, peerid, peer_nick=''):
     result = False
     if not peerid in self.peers and peerid != self.peerid:
       self.peers.append(peerid)
+      if peer_nick != '':
+        self.setPeerNickname(peerid, peer_nick)
+        
       result = self.sendData('JOIN', self.getPeerNickname(self.peerid)) # send our nickname in the message of JOIN
-      self.debugMessage('Added peer: ' + self.getPeerNickname(peerid))
-      if not result:
+      self.debugMessage('Adding peer: ' + self.getPeerNickname(peerid))
+      if result:
+        self.debugMessage('Successfully added ' + self.getPeerNickname(peerid))
+      else:
+        self.debugMessage('Could not connect to ' + self.getPeerNickname(peerid))
         self.dropPeer(peerid)
         
     try:
@@ -210,8 +217,7 @@ class kaishi(object):
     
   def makePeerList(self):
     peers = {}
-    for peerid in self.peers:
-      peers.update({peerid: self.getPeerNickname(peerid)})
+    [peers.update({peerid: self.getPeerNickname(peerid)}) for peerid in self.peers]
     
     return pickle.dumps(peers)
 
@@ -220,19 +226,24 @@ class kaishi(object):
     if self.provider != '':
       added_nodes = 0
       known_nodes = urllib.urlopen(self.provider).read()
-      if known_nodes != '':
-        known_nodes = known_nodes.split('\n')
-        for known_node in known_nodes:
-          if known_node != '':
-            added_nodes += 1
-            self.addPeer(known_node)
-            self.debugMessage('Added ' + known_node + ' from provider')
+      if known_nodes.startswith('?'):
+        if len(known_nodes) > 1:
+          known_nodes = known_nodes[1:].split('\n')
+          for known_node in known_nodes:
+            if known_node != '':
+              added_nodes += 1
+              self.addPeer(known_node)
+              self.debugMessage('Added ' + known_node + ' from provider')
+        else:
+          self.debugMessage('Provider returned zero peers.  You are all alone...')
+      else:
+        self.debugMessage('Provider returned an invalid result (first character was not "?")')
     else:
       self.debugMessage('No provider is currently set')
 
   def debugMessage(self, message):
     if self.debug:
-      print message
+      print "DEBUG:", message
       
   def gracefulExit(self):
     self.sendDropNotice()

@@ -29,7 +29,7 @@ class kaishiChat(object):
     print 'Initializing kaishi...'
 
     self.kaishi = kaishi()
-    self.kaishi.provider = 'http://vector.cluenet.org/~tj9991/provider.php' # kaishi chat provider
+    self.kaishi.provider = 'http://p2p.paq.cc/provider.php' # kaishi chat provider
     self.kaishi.handleIncomingData = self.handleIncomingData
     self.kaishi.handleAddedPeer = self.handleAddedPeer
     self.kaishi.handlePeerNickname = self.handlePeerNickname
@@ -116,7 +116,11 @@ class kaishiChat(object):
     if function == 'peers':
       self.printMessage(str(len(self.kaishi.peers)) + ' other peers in current scope.')
       for peerid in self.kaishi.peers:
-        self.printMessage(self.kaishi.getPeerNickname(peerid))
+        peer_nick = self.kaishi.getPeerNickname(peerid)
+        if peer_nick == peerid:
+          self.printMessage(peerid)
+        else:
+          self.printMessage(peerid + ' (' + peer_nick + ')')
     elif function == 'clearpeers':
       for peerid in self.kaishi.peers:
         self.kaishi.dropPeer(peerid)
@@ -220,12 +224,14 @@ class kaishiChat(object):
   #==============================================================================
     
   def printChatMessage(self, peerid, message, action=False):
+    chatline = ''
     if not action:
-      print '\n<' + self.kaishi.getPeerNickname(peerid) + '>'
+      chatline += '\n<' + self.kaishi.getPeerNickname(peerid) + '>'
     else:
-      print '\n* ' + self.kaishi.getPeerNickname(peerid)
+      chatline += '\n* ' + self.kaishi.getPeerNickname(peerid)
+    chatline += ' ' + message
 
-    print ' ' + message
+    print chatline
     self.userMSG(self.kaishi.getPeerNickname(peerid), message, action)
     
   def printMessage(self, message):
